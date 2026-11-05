@@ -10,11 +10,12 @@
    - Calcula automaticamente o limiar ótimo de luminância maximizando a variância inter-classes ($\sigma_B^2$) para garantir contraste máximo em leitores OCR.
    - Embute a assinatura binária do payload diretamente nos bits menos significativos (LSB) do documento/imagem.
 
-2. **Codificação em Bits Invisíveis (`Zero-Width Bitstream`)**
-   - Converte diretrizes de avaliação, competências e resumo executivo em sequências binárias de 8 bits (`01000111...`) mapeadas para caracteres Unicode de largura zero (`U+200B` para bit `0`, `U+200C` para bit `1`, delimitados por `U+200D`).
+2. **Codificação em Bits Invisíveis Zero-Hitbox (`Plane-14 Tags & Variation Selectors`)**
+   - Converte diretrizes de avaliação, competências e resumo executivo em sequências binárias mapeadas para **Unicode Plane-14 Tag Characters (`U+E0001`..`U+E007F`)** e **Variation Selectors (`U+FE00`..`U+FE0F`)** (2 nibbles de 4 bits por byte), que possuem largura de avanço `0x0px` e não criam área de seleção de cursor.
 
-3. **Camada Micro-Semântica PDF & Dicionário Binário XMP**
-   - Utiliza manipulação direta de estrutura PDF (`pdf-lib` + trailer binário) para gravar metadados de alta afinidade (`/Title`, `/Subject`, `/Keywords`, `/Producer`) e uma camada de texto em micro-escala (`0.6pt`, opacidade `0.01`) invisível a olho nu, porém 100% legível por extratores de texto de IA e sistemas ATS.
+3. **Camada Stealth Anti-Hover PDF (`Off-CropBox`) & Catálogo Binário XMP**
+   - Trava o `/CropBox`, `/TrimBox` e `/BleedBox` na área visível da página `[0, 0, W, H]` e grava os operadores de texto em coordenadas **fora do viewport (`x: -16384, y: -16384`)** com escala `0.0001pt` e `opacity: 0`, além de injetar um objeto `FlateStream` `/Metadata` (`/Subtype /XML`) diretamente no catálogo do PDF (`pdfDoc.catalog`).
+   - Impede qualquer detecção por passagem de mouse (*hover* / cursor *I-beam*) em leitores de PDF, mantendo 100% de leitura por extratores de texto de IA e sistemas ATS.
 
 4. **Inspetor Hexadecimal e Simulador de Leitura IA em Tempo Real**
    - Visualize o dump hexadecimal (`Hex + ASCII`) antes e depois da injeção de bits e simule como um parser de IA/ATS interpreta o documento otimizado.
