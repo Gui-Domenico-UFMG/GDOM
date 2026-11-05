@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "PowerShell",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Skill",
+      "Artifact",
+      "mcp__*",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm run:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}
