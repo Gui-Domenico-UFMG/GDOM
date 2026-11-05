@@ -55,6 +55,25 @@ python backend/gdom_engine.py meu_curriculo.pdf --role "Engenheiro de Software &
 
 ---
 
+## Ferramentas de Verificação (Defensivas)
+
+Para auditar um documento — inclusive os gerados pelo próprio GDOM — sem depender de nenhuma simulação:
+
+```bash
+# Detecta texto oculto, Unicode invisível (decodifica o payload), dados após %%EOF e frases de injeção de prompt
+python backend/gdom_scan.py curriculo.pdf          # exit code 1 se severidade alta; --json disponível
+
+# Verificador de ATS honesto: texto realmente extraído, cobertura de keywords e estrutura (ignora conteúdo oculto)
+python backend/gdom_ats.py curriculo.pdf --keywords "Python, SQL, Docker"   # ou --job vaga.txt
+
+# Testes
+python -m unittest discover -s tests -v
+```
+
+O `gdom_ats.py` usa `pypdf` para PDFs (`pip install pypdf`). A nota é uma heurística transparente (70% keywords + 30% estrutura), não uma previsão do que um ATS específico fará. Conteúdo oculto é ignorado na nota e reportado como aviso: triagens modernas tendem a penalizá-lo.
+
+---
+
 ## Autor
 
 Desenvolvido por **Guilherme Domenico** ([Gui-Domenico-UFMG](https://github.com/Gui-Domenico-UFMG)).
