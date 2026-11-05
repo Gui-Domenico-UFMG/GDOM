@@ -31,10 +31,27 @@ def bits_to_text(bits: str) -> str:
 
 
 def encode_zero_width_bitstream(payload: str) -> str:
-    """Codifica um texto em bits invisíveis usando caracteres Unicode Zero-Width."""
-    bits = text_to_bits(payload)
-    encoded = "".join(ZW_ONE if b == "1" else ZW_ZERO for b in bits)
-    return f"{ZW_DELIM}{encoded}{ZW_DELIM}"
+    """
+    Codifica o payload usando:
+    1) Unicode Plane-14 Tag Characters (U+E0000..U+E007F) — 0x0px de hitbox (imune a cursor/seleção de mouse)
+    2) Variation Selectors (U+FE00..U+FE0F) codificando nibbles hexadecimais (4 bits por seletor)
+    """
+    tag_chars = [chr(0xE0001)]
+    for ch in payload:
+        code = ord(ch)
+        if 0x20 <= code <= 0x7E:
+            tag_chars.append(chr(0xE0000 + code))
+    tag_chars.append(chr(0xE007F))
+
+    raw_bytes = payload.encode("utf-8")
+    vs_chars = []
+    for b in raw_bytes:
+        high_nibble = (b >> 4) & 0x0F
+        low_nibble = b & 0x0F
+        vs_chars.append(chr(0xFE00 + high_nibble))
+        vs_chars.append(chr(0xFE00 + low_nibble))
+
+    return "".join(tag_chars) + "".join(vs_chars)
 
 
 def compute_otsu_threshold(grayscale_values: bytes | bytearray | list[int]) -> int:

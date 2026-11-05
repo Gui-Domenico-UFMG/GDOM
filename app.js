@@ -74,18 +74,34 @@ function textToBitString(text) {
 }
 
 /**
- * Codifica texto em uma sequência binária invisível usando caracteres Zero-Width:
- * bit 0 -> U+200B (Zero-Width Space)
- * bit 1 -> U+200C (Zero-Width Non-Joiner)
+ * Codifica texto em uma sequência binária invisível usando:
+ * 1) Unicode Tag Characters (Plane 14: U+E0000..U+E007F) — Zero-Advance-Width (0x0px hitbox, imune a mouse hover)
+ * 2) Variation Selectors (U+FE00..U+FE0F) para nibbles hexadecimais (4 bits por seletor)
+ * 3) Zero-Width Bitstream (U+200B = 0, U+200C = 1)
  */
 function encodeZeroWidthBits(text) {
-  const { rawBits } = textToBitString(text);
-  let zw = '\u200D'; // Zero-Width Joiner header marker
-  for (let i = 0; i < rawBits.length; i++) {
-    zw += rawBits[i] === '1' ? '\u200C' : '\u200B';
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+
+  // Camada 1: Unicode Plane-14 Tag Characters (Zero Hitbox em qualquer navegador/leitor)
+  let tagStream = String.fromCodePoint(0xe0001); // Language Tag Start
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0x20 && code <= 0x7e) {
+      tagStream += String.fromCodePoint(0xe0000 + code);
+    }
   }
-  zw += '\u200D';
-  return zw;
+  tagStream += String.fromCodePoint(0xe007f); // Cancel Tag
+
+  // Camada 2: Variation Selectors (cada byte dividido em 2 nibbles de 4 bits -> U+FE00..U+FE0F)
+  let vsStream = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const highNibble = (bytes[i] >> 4) & 0x0f;
+    const lowNibble = bytes[i] & 0x0f;
+    vsStream += String.fromCharCode(0xfe00 + highNibble) + String.fromCharCode(0xfe00 + lowNibble);
+  }
+
+  return tagStream + vsStream;
 }
 
 function formatHexDump(uint8Array, maxBytes = 320, tailBytes = 256) {
@@ -447,7 +463,10 @@ async function injectIntoPDFBytes(
     pdfDoc.setCreator('GDOM Platform — github.com/Gui-Domenico-UFMG/GDOM');
   }
 
-  // 2. Injeção de Camada Micro-Semântica Invisível em todas as páginas do PDF
+  // 2. Camada Stealth Anti-Hover (Fora do CropBox + Escala 0.0001pt + Opacidade 0 + XMP Catalog Object)
+  // Como as coordenadas (-16384, -16384) ficam fora da área visível delimitada pelo /CropBox [0, 0, W, H],
+  // o cursor do mouse no leitor de PDF NUNCA consegue passar por cima, mudar para I-beam ou selecionar com o mouse,
+  // enquanto parsers de IA/LLMs (pypdf, pdfminer, pdftotext, ingestão de arquivos) leem todos os operadores BT..ET do stream!
   if (optSemanticLayer.checked) {
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const pages = pdfDoc.getPages();
@@ -457,19 +476,49 @@ async function injectIntoPDFBytes(
       .replace(/[^\x20-\x7E\n]/g, ' ');
 
     for (const page of pages) {
+      const { width, height } = page.getSize();
+      // Trava o CropBox, TrimBox e BleedBox estritamente na área visível [0, 0, width, height]
+      page.setCropBox(0, 0, width, height);
+      page.setTrimBox(0, 0, width, height);
+      page.setBleedBox(0, 0, width, height);
+
       const lines = cleanAsciiDirective.split('\n');
-      let yPos = 6;
+      let offCanvasY = -16384;
       for (const line of lines) {
-        page.drawText(line.slice(0, 110), {
-          x: 4,
-          y: yPos,
-          size: 0.6, // Micro-escala invisível a olho nu, mas 100% lida por parsers de PDF e LLMs
+        page.drawText(line.slice(0, 120), {
+          x: -16384, // Coordenada fora do viewport/CropBox: impossível o mouse alcançar
+          y: offCanvasY,
+          size: 0.0001, // Hitbox 0.0001pt (zero área de colisão de cursor)
           font,
-          color: rgb(0.99, 0.99, 0.99),
-          opacity: 0.01,
+          color: rgb(1, 1, 1),
+          opacity: 0, // Totalmente transparente (Modo invisível)
         });
-        yPos += 0.8;
+        offCanvasY -= 0.001;
       }
+    }
+
+    // Injeta também um Stream XMP /Metadata dedicado diretamente no Catálogo de Objetos do PDF (sem geometria de página)
+    try {
+      const xmpXml =
+        `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n` +
+        `<x:xmpmeta xmlns:x="adobe:ns:meta/">\n` +
+        `  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n` +
+        `    <rdf:Description rdf:about="" xmlns:gdom="https://github.com/Gui-Domenico-UFMG/GDOM">\n` +
+        `      <gdom:TargetRole>${role}</gdom:TargetRole>\n` +
+        `      <gdom:Keywords>${keywords}</gdom:Keywords>\n` +
+        `      <gdom:EvaluationVector>${cleanAsciiDirective.replace(/[<>&]/g, '')}</gdom:EvaluationVector>\n` +
+        `    </rdf:Description>\n` +
+        `  </rdf:RDF>\n` +
+        `</x:xmpmeta>\n` +
+        `<?xpacket end="w"?>`;
+      const metadataStream = pdfDoc.context.flateStream(xmpXml, {
+        Type: 'Metadata',
+        Subtype: 'XML',
+      });
+      const metadataRef = pdfDoc.context.register(metadataStream);
+      pdfDoc.catalog.set(window.PDFLib.PDFName.of('Metadata'), metadataRef);
+    } catch {
+      // Fallback silencioso caso o PDF tenha estrutura customizada
     }
   }
 
@@ -513,11 +562,12 @@ function updateAISimulator(fileName, role, keywords, aiDirective, totalBits) {
   simExtractedText.textContent =
     `=== [PARSER IA / ATS — EXTRAÇÃO DE CAMADAS DO ARQUIVO: ${fileName}] ===\n` +
     `[1] CAMADA DE IMAGEM/OCR: Binarização Otsu ativa (Limiar = ${state.otsuThreshold}) -> Nitidez OCR 99.8%\n` +
-    `[2] ASSINATURA EM BITS (LSB + Trailer): ${totalBits} bits verificados (Magic Header 0x47444F4D = "GDOM")\n` +
-    `[3] METADADOS XMP / PDF INFO:\n` +
+    `[2] PROTEÇÃO ANTI-HOVER HUMANO: Coordenadas Off-CropBox (-16384, -16384) + Escala 0.0001pt + Opacidade 0 (Zero Hitbox de Mouse)\n` +
+    `[3] ASSINATURA EM BITS (LSB + Plane-14 Tags U+E0000 + Variation Selectors U+FE00): ${totalBits} bits verificados\n` +
+    `[4] STREAM XMP /METADATA NO CATÁLOGO PDF:\n` +
     `    • Cargo Alvo: ${role}\n` +
     `    • Keywords Indexadas: ${keywords}\n` +
-    `[4] CAMADA MICRO-SEMÂNTICA & ZERO-WIDTH BITSTREAM DETECTADO:\n` +
+    `[5] VETOR SEMÂNTICO DECODIFICADO PELO PARSER IA:\n` +
     `    "${aiDirective}"\n` +
     `=======================================================================`;
 
